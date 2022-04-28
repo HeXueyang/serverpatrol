@@ -91,8 +91,7 @@ def scanIcmp(ip):
     result = sr1(packet,timeout=1,verbose=False)
     if result:
         return 0
-    else:
-        return 1
+    return 1
 
 def scanRemote(ip,port):
     packet = IP(dst=ip)/TCP(dport=int(port))
@@ -100,10 +99,7 @@ def scanRemote(ip,port):
     if result:
         if result[TCP].flags=='SA':
             return 0
-        else:
-            return 2
-    else:
-        return 2
+    return 2
 
 def main():
     serverList=getServer()

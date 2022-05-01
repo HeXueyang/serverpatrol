@@ -4,10 +4,11 @@ from email.mime.text import MIMEText
 from scapy.all import *
 from random import randint
 from multiprocessing import Pool
+from pymysql.constants import CLIENT
+host,user,password,port='172.17.0.1','root','root',3306
 
 def getMysql(col,tablesName,item=None):
-    host,user,password,port='172.17.0.1','root','root',3306
-    mysql = pymysql.connect (host=host, user=user, password=password, port=port)
+    mysql = pymysql.connect (host=host, user=user, password=password, port=port,charset='utf8')
     cursor = mysql.cursor()
     sql = "select {} from {} {};".format(col,tablesName,item)
     cursor.execute(sql)
@@ -16,14 +17,27 @@ def getMysql(col,tablesName,item=None):
     mysql.close()
     return results
 
-def updateMysql(tablesName,fieldValue,itemValue):
-    mysql = pymysql.connect (host=host, user=user, password=password, port=port)
-    cursor = mysql.cursor()
-    sql = 'update {} set checkNum={} where ip={};'.format(tablesName,fieldValue,itemValue)
-    cursor.execute(sql)
-    mysql.commit()
-    cursor.close()
-    mysql.close()
+def updateMysql(updateValue):
+    if updateValue and "update" in updateValue:
+        mysql = pymysql.connect (host=host, user=user, password=password, port=port,charset='utf8',client_flag=CLIENT.MULTI_STATEMENTS)
+        cursor = mysql.cursor()
+        sql = updateValue
+        cursor.execute(sql)
+        mysql.commit()
+        cursor.close()
+        mysql.close()
+
+def mysqlWhere(messList):
+    while [] in messList:
+        messList.remove([])
+    if messList:
+        updateValue=""
+        for i in messList:
+            ip='"{}"'.format(i[0])
+            updateValue+='update django.app01_serverinfo set checkNum={} where ip={};'.format(i[1],ip)
+        return updateValue
+    else:
+        return messList
 
 def getServer():
     results=getMysql('ip,os,checkNum','django.app01_serverinfo')
@@ -31,7 +45,7 @@ def getServer():
     for i in results:
         if i[1] == 1:
             serverList.append({"ip":i[0],"port":"3389","checkNum":i[2]})
-        else:
+        if i[1] == 2:
             serverList.append({"ip":i[0],"port":"22","checkNum":i[2]})
     return serverList
 
@@ -71,17 +85,21 @@ def sendMail(emailBody):
 
 def scanPool(result_list):
     p = Pool(processes=8)
-    p.map(scan,result_list)
+    res = p.map(scan,result_list)
     p.close
     p.join
+    return res
 
 def scan(server):
+    b=0
     a=scanIcmp(server['ip'])
-    b=scanRemote(server['ip'],server['port'])
+    if server['port'] == "3389" or server['port'] == "22" :
+        b=scanRemote(server['ip'],server['port'])
     c = int(a+b)
+    messList=[]
     if server["checkNum"] != c:
-        ip='"{}"'.format(server['ip'])
-        updateMysql('django.app01_serverinfo',c,ip)
+        messList=[server['ip'],c]
+    return messList
 
 def scanIcmp(ip):
     ip_id = randint(1,65535) 
@@ -98,12 +116,14 @@ def scanRemote(ip,port):
     result = sr1(packet,timeout=1,verbose=False)
     if result:
         if result[TCP].flags=='SA':
-            return 0
+            return 0    
     return 2
 
 def main():
     serverList=getServer()
-    scanPool(serverList)
+    res = scanPool(serverList)
+    updateValue = mysqlWhere(res)
+    updateMysql(updateValue)
     emailBody=getEmailbody()
     if emailBody:
         sendMail(emailBody)
